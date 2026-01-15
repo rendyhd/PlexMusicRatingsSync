@@ -335,6 +335,10 @@ def _get_rating_from_m4a(file_path):
     try:
         audio = MP4(file_path)
 
+        if audio.tags is None:
+            log_debug("▸ No tags found in M4A file", 4)
+            return None
+
         rating_raw = audio.tags.get("rate")
 
         if rating_raw:
@@ -388,44 +392,62 @@ def _set_rating_to_m4a(file_path, plex_rating):
 
 def get_rating_from_file(file_path):
     """
-    Read rating from a music file based on its extension. Returns the rating on the 1-10
-    scale used by Plex.
+    Read rating from a music file based on its extension.
+
+    Args:
+        file_path: Path to the audio file
+
+    Returns:
+        int or None: Rating on the 1-10 scale used by Plex, or None if no rating found
     """
-    if file_path.endswith(".mp3"):
+    file_lower = file_path.lower()
+
+    if file_lower.endswith(".mp3"):
         return _get_rating_from_mp3(file_path)
-
-    if file_path.endswith(".m4a"):
+    elif file_lower.endswith(".m4a"):
         return _get_rating_from_m4a(file_path)
-
-    for ext, file_type in _AIFF_FORMATS.items():
-        if file_path.endswith(ext):
-            return _get_rating_from_aiff(file_path)
-
-    for ext, file_type in _VORBIS_FORMATS.items():
-        if file_path.endswith(ext):
-            return _get_rating_from_vorbis(file_path, file_type)
+    elif file_lower.endswith((".aif", ".aiff")):
+        return _get_rating_from_aiff(file_path)
+    elif file_lower.endswith(".flac"):
+        return _get_rating_from_vorbis(file_path, "FLAC")
+    elif file_lower.endswith(".ogg"):
+        return _get_rating_from_vorbis(file_path, "OGG")
+    elif file_lower.endswith(".opus"):
+        return _get_rating_from_vorbis(file_path, "OPUS")
 
     return None
 
 
 def set_rating_to_file(file_path, plex_rating):
     """
-    Write rating to a music file based on its extension. Converts the Plex rating to the
-    appropriate format for the file type.
+    Write rating to a music file based on its extension.
+
+    Args:
+        file_path: Path to the audio file
+        plex_rating: Rating value on the 1-10 scale
+
+    Note:
+        Converts the Plex rating to the appropriate format for the file type.
     """
-    if file_path.endswith(".mp3"):
+    # Validate rating value
+    if plex_rating is not None and (not isinstance(plex_rating, (int, float)) or not (0 <= plex_rating <= 10)):
+        log_error(f"▪ Invalid rating value: {plex_rating}", 4)
+        return
+
+    file_lower = file_path.lower()
+
+    if file_lower.endswith(".mp3"):
         _set_rating_to_mp3(file_path, plex_rating)
-
-    if file_path.endswith(".m4a"):
+    elif file_lower.endswith(".m4a"):
         _set_rating_to_m4a(file_path, plex_rating)
-
-    for ext, file_type in _AIFF_FORMATS.items():
-        if file_path.endswith(ext):
-            _set_rating_to_aiff(file_path, plex_rating)
-
-    for ext, file_type in _VORBIS_FORMATS.items():
-        if file_path.endswith(ext):
-            _set_rating_to_vorbis(file_path, plex_rating, file_type)
+    elif file_lower.endswith((".aif", ".aiff")):
+        _set_rating_to_aiff(file_path, plex_rating)
+    elif file_lower.endswith(".flac"):
+        _set_rating_to_vorbis(file_path, plex_rating, "FLAC")
+    elif file_lower.endswith(".ogg"):
+        _set_rating_to_vorbis(file_path, plex_rating, "OGG")
+    elif file_lower.endswith(".opus"):
+        _set_rating_to_vorbis(file_path, plex_rating, "OPUS")
 
 
 def get_rating_from_plex(plex_item):

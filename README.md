@@ -29,6 +29,7 @@ PlexMusicRatingsSync bridges the gap between Plex and your local audio files, en
   - [Supported Audio Formats](#supported-audio-formats)
   - [Rating Schemes](#rating-schemes)
 - [Automation](#automation)
+  - [Docker (Built-in Scheduler)](#docker-built-in-scheduler)
   - [Linux (Cron)](#linux-cron)
   - [macOS (launchd)](#macos-launchd)
   - [Windows (Task Scheduler)](#windows-task-scheduler)
@@ -311,6 +312,64 @@ PlexMusicRatingsSync handles multiple rating schemes automatically:
 
 ## Automation
 
+### Docker (Built-in Scheduler)
+
+The Docker image includes a built-in scheduler using [supercronic](https://github.com/aptible/supercronic), making it the simplest way to run scheduled syncs. Just set the `PMRS_SCHEDULE` environment variable.
+
+**Quick Start - Daily sync at 3 AM:**
+
+```yaml
+# docker-compose.yml
+services:
+  plex-music-ratings-sync:
+    image: ghcr.io/rfgamaral/plex-music-ratings-sync
+    container_name: plex-music-ratings-sync
+    restart: unless-stopped
+    environment:
+      - PMRS_SCHEDULE=0 3 * * *    # Daily at 3:00 AM
+      - PMRS_COMMAND=sync          # Command to run (sync, import, export)
+      - PMRS_ARGS=--quiet          # Additional arguments
+    volumes:
+      - ./pmrs-data:/app/data      # Config and logs
+      - /path/to/music:/plex/music # Must match Plex's path!
+```
+
+**Start the scheduled container:**
+
+```bash
+docker compose up -d
+```
+
+**Schedule Examples:**
+
+| Schedule | Description |
+|----------|-------------|
+| `0 3 * * *` | Daily at 3:00 AM |
+| `0 */6 * * *` | Every 6 hours |
+| `0 3 * * 0` | Every Sunday at 3:00 AM |
+| `@daily` | Once a day (midnight) |
+| `@hourly` | Once an hour |
+
+**Environment Variables:**
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PMRS_SCHEDULE` | Cron schedule expression (empty = run once and exit) | `` |
+| `PMRS_COMMAND` | Command to run: `sync`, `import`, or `export` | `sync` |
+| `PMRS_ARGS` | Additional arguments (e.g., `--quiet`, `--dry-run`) | `` |
+
+**One-shot mode (no schedule):**
+
+Without `PMRS_SCHEDULE`, the container runs once and exits:
+
+```bash
+# Run sync once
+docker compose run --rm plex-music-ratings-sync sync
+
+# Preview changes
+docker compose run --rm plex-music-ratings-sync sync --dry-run
+```
+
 ### Linux (Cron)
 
 ```bash
@@ -525,11 +584,17 @@ cd PlexMusicRatingsSync
 python3 -m venv venv
 source venv/bin/activate
 
-# Install in development mode
-pip install -e .
+# Install in development mode with test dependencies
+pip install -e ".[dev]"
 
 # Run the tool
 plex-music-ratings-sync --help
+
+# Run tests
+pytest
+
+# Run tests with coverage
+pytest --cov=plex_music_ratings_sync
 ```
 
 ## License

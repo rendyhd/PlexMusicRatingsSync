@@ -2,7 +2,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from plexapi.exceptions import BadRequest, NotFound, Unauthorized
 from plexapi.server import PlexServer
+from requests.exceptions import ConnectionError, Timeout
 
 from plex_music_ratings_sync.config import get_plex_config
 from plex_music_ratings_sync.logger import log_debug, log_error, log_info, log_warning
@@ -19,18 +21,51 @@ _SUPPORTED_EXTENSIONS = (".flac", ".m4a", ".mp3", ".ogg", ".opus", ".aif", ".aif
 """Audio file extensions that are supported for rating synchronization."""
 
 
+def _get_track_file_path(track):
+    """
+    Safely extract the file path from a Plex track item.
+
+    Args:
+        track: A Plex track object
+
+    Returns:
+        Path object if successful, None if track has no media/parts
+    """
+    try:
+        if not track.media:
+            return None
+        if not track.media[0].parts:
+            return None
+        return Path(track.media[0].parts[0].file)
+    except (AttributeError, IndexError, TypeError):
+        return None
+
+
 class RatingSync:
     def __init__(self):
         plex_config = get_plex_config()
+        plex_url = plex_config["url"]
+        plex_token = plex_config["token"]
 
         try:
-            log_info(f"Connecting to Plex server: **{plex_config['url']}**")
-
-            self.plex = PlexServer(plex_config["url"], plex_config["token"])
-
+            log_info(f"Connecting to Plex server: **{plex_url}**")
+            self.plex = PlexServer(plex_url, plex_token)
             log_info(f"Connected to Plex server: **{self.plex.friendlyName}**")
+        except Unauthorized:
+            log_error("Failed to connect to Plex server: Invalid or expired token")
+            sys.exit(1)
+        except (ConnectionError, Timeout) as e:
+            log_error(f"Failed to connect to Plex server: Connection error - {e}")
+            sys.exit(1)
+        except BadRequest as e:
+            log_error(f"Failed to connect to Plex server: Bad request - {e}")
+            sys.exit(1)
         except Exception as e:
-            log_error(f"Failed to connect to Plex server: {e}")
+            # Sanitize error message to prevent token exposure
+            error_msg = str(e)
+            if plex_token in error_msg:
+                error_msg = error_msg.replace(plex_token, "***REDACTED***")
+            log_error(f"Failed to connect to Plex server: {error_msg}")
             sys.exit(1)
 
         self.libraries = plex_config["libraries"]
@@ -47,7 +82,10 @@ class RatingSync:
         """
         item_start_time = datetime.now()
 
-        file_path = Path(item.media[0].parts[0].file)
+        file_path = _get_track_file_path(item)
+        if file_path is None:
+            log_warning(f"▸ Track has no media file information: **{item.title}**", 4)
+            return
 
         track_index = item.index if item.index is not None else 0
 
@@ -110,12 +148,30 @@ class RatingSync:
 
                     for album in item.albums():
                         album_tracks = album.tracks()
-                        album_path = Path(album_tracks[0].media[0].parts[0].file).parent
 
-                        log_info(
-                            f"Album: **{album.title}** __({album_path})__",
-                            2,
-                        )
+                        # Skip albums with no tracks
+                        if not album_tracks:
+                            log_warning(f"Album has no tracks: **{album.title}**", 2)
+                            continue
+
+                        # Get album path from first track with valid media
+                        album_path = None
+                        for track in album_tracks:
+                            track_path = _get_track_file_path(track)
+                            if track_path:
+                                album_path = track_path.parent
+                                break
+
+                        if album_path is None:
+                            log_warning(
+                                f"Album: **{album.title}** __(could not determine path)__",
+                                2,
+                            )
+                        else:
+                            log_info(
+                                f"Album: **{album.title}** __({album_path})__",
+                                2,
+                            )
 
                         for track in album_tracks:
                             self._process_item(track, mode=mode)
